@@ -91,17 +91,17 @@
 <div class="panel">
   <h1>c5080 精确 Ragdoll 胶囊模拟</h1>
   <div class="sub">
-    这版不再用 <b>Nodes.json 包围盒推测</b>，而是直接按 <span class="ok">HKX 里的 48 根 ragdoll body</span>
+    直接按 <span class="ok">hkxpwv里的 48 根 ragdoll body</span>
     来画：每根胶囊都来自 <b>body 的世界位置 / 朝向</b> + <b>capsule shape 的几何</b>。<br>
-    所以这版的骨骼位置会比上一版更接近游戏里真正的物理胶囊。
+    更接近游戏里真正的物理胶囊。
   </div>
 
   <div class="grid2 blk">
     <div>
       <label>视角预设</label>
       <select id="preset">
-        <option value="game1">近似截图1</option>
-        <option value="game2">近似截图2</option>
+        <option value="game1">测试角度1</option>
+        <option value="game2">测试角度2</option>
         <option value="side">侧面</option>
         <option value="front">正面</option>
         <option value="top">俯视</option>
@@ -173,7 +173,7 @@
     </div>
     <div class="small" style="margin-top:6px;">
       会按你输入的多个名字对 <span class="mono">name</span> 和 <span class="mono">masterBone</span> 做
-      <b>完全匹配</b>，不会再做近似包含匹配。
+      <b>完全匹配</b>，不做近似包含匹配。
     </div>
   </div>
 
@@ -203,7 +203,7 @@
   </div>
 
   <div class="small">
-    操作：左键拖动旋转，右键拖动平移视图，滚轮平行缩放。<br>
+    操作：左键拖动旋转，shift+左键，滚轮平行缩放。<br>
     <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> 平移模型，
     <span class="kbd">Q</span><span class="kbd">E</span> 上下移动。<br>
     也可以直接 <b>点击胶囊</b> 选中。
@@ -219,12 +219,6 @@
   <div id="stat5" class="statline"></div>
   <div id="stat6" class="statline mono"></div>
   <div id="stat7" class="statline mono"></div>
-</div>
-
-<div class="hint">
-  这一版的思路变了：<br>
-  上一版是“根据节点包围盒猜胶囊”，这一版是“直接用 HKX 里的 ragdoll body + capsule shape”。<br>
-  所以如果你之前觉得有些骨骼位置不对，这版应该会明显更准。
 </div>
 
 <script>
