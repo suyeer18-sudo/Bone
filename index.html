@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>c5080 精确 Ragdoll 胶囊模拟</title>
+<style>
+  :root {
+    --bg0:#0d1117;
+    --bg1:#2a3641;
+    --bg2:#10161d;
+    --panel:rgba(12,16,22,.90);
+    --line:#ff9a4d;
+    --lineDim:rgba(255,154,77,.23);
+    --lineSel:#fff1df;
+    --lineSel2:#ffd39e;
+    --text:#edf2f7;
+    --muted:#97a6b5;
+    --ok:#89d185;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg0); color:var(--text); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  canvas {
+    position:fixed; inset:0; width:100%; height:100%; display:block;
+    background:
+      radial-gradient(circle at 14% 78%, rgba(0,160,255,.13), transparent 15%),
+      radial-gradient(circle at 84% 76%, rgba(255,136,0,.17), transparent 18%),
+      linear-gradient(180deg, #2d3945 0%, #1e2833 38%, #131a22 70%, #0c1117 100%);
+  }
+  .panel {
+    position:fixed; top:14px; left:14px; width:430px; max-height:calc(100% - 28px); overflow:auto;
+    padding:14px; border-radius:16px; background:var(--panel);
+    border:1px solid rgba(255,255,255,.08); backdrop-filter:blur(8px); box-shadow:0 12px 40px rgba(0,0,0,.35);
+  }
+  .stats {
+    position:fixed; top:14px; right:14px; width:300px; padding:12px 14px;
+    border-radius:16px; background:var(--panel);
+    border:1px solid rgba(255,255,255,.08); backdrop-filter:blur(8px);
+  }
+  .hint {
+    position:fixed; left:14px; bottom:14px; max-width:600px; padding:10px 12px;
+    border-radius:14px; background:var(--panel);
+    border:1px solid rgba(255,255,255,.08); backdrop-filter:blur(8px);
+    color:var(--muted); font-size:12px; line-height:1.6;
+  }
+  h1 { margin:0 0 6px; font-size:18px; }
+  h2 { margin:0 0 8px; font-size:15px; }
+  .sub { color:var(--muted); font-size:12px; line-height:1.55; margin-bottom:12px; }
+  .ok { color:var(--ok); font-weight:700; }
+  .blk { margin-bottom:10px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .rowbtns { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .rowbtns2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; }
+  select, input[type=text], input[type=range], button {
+    width:100%; padding:9px 10px; border-radius:10px;
+    border:1px solid rgba(255,255,255,.10);
+    background:rgba(255,255,255,.05); color:var(--text);
+  }
+  select[size] { height:260px; padding:4px; }
+  button { cursor:pointer; font-weight:600; }
+  button:hover { background:rgba(255,255,255,.09); }
+  .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .checks label {
+    display:flex; align-items:center; gap:8px; margin:0; padding:8px 10px;
+    border-radius:10px; color:var(--text); background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.06);
+  }
+  .divider { height:1px; background:rgba(255,255,255,.08); margin:12px 0; }
+  .small { font-size:12px; color:var(--muted); line-height:1.55; }
+  .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .kbd {
+    display:inline-block; min-width:24px; padding:2px 6px; margin:0 2px;
+    border-radius:7px; border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.06); color:#fff; font-size:11px; text-align:center;
+  }
+  .statline { font-size:12px; color:var(--muted); margin:4px 0; }
+  .groupBox { border:1px solid rgba(255,255,255,.08); border-radius:12px; background:rgba(255,255,255,.03); margin-bottom:8px; overflow:hidden; }
+  .groupBox summary { cursor:pointer; list-style:none; padding:10px 12px; font-size:13px; color:var(--text); background:rgba(255,255,255,.04); }
+  .groupBox summary::-webkit-details-marker { display:none; }
+  .groupBody { padding:10px 12px; }
+  .groupTerms { font-size:12px; color:var(--muted); line-height:1.55; white-space:pre-wrap; word-break:break-word; }
+  .groupHits { font-size:12px; color:var(--text); line-height:1.55; margin-top:8px; white-space:pre-wrap; word-break:break-word; }
+  .groupBtns { display:grid; grid-template-columns:1fr; gap:8px; margin-top:8px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="panel">
+  <h1>c5080 精确 Ragdoll 胶囊模拟</h1>
+  <div class="sub">
+    这版不再用 <b>Nodes.json 包围盒推测</b>，而是直接按 <span class="ok">HKX 里的 48 根 ragdoll body</span>
+    来画：每根胶囊都来自 <b>body 的世界位置 / 朝向</b> + <b>capsule shape 的几何</b>。<br>
+    所以这版的骨骼位置会比上一版更接近游戏里真正的物理胶囊。
+  </div>
+
+  <div class="grid2 blk">
+    <div>
+      <label>视角预设</label>
+      <select id="preset">
+        <option value="game1">近似截图1</option>
+        <option value="game2">近似截图2</option>
+        <option value="side">侧面</option>
+        <option value="front">正面</option>
+        <option value="top">俯视</option>
+      </select>
+    </div>
+    <div>
+      <label>平行缩放</label>
+      <input id="zoom" type="range" min="6" max="260" step="1" value="70">
+    </div>
+  </div>
+
+  <div class="grid3 blk">
+    <div>
+      <label>环向分段</label>
+      <input id="segments" type="range" min="6" max="24" step="1" value="12">
+    </div>
+    <div>
+      <label>半圆分段</label>
+      <input id="capSteps" type="range" min="2" max="10" step="1" value="5">
+    </div>
+    <div>
+      <label>拾取半径</label>
+      <input id="pickRadius" type="range" min="10" max="40" step="1" value="20">
+    </div>
+  </div>
+
+  <div class="grid3 blk">
+    <div>
+      <label>模型 X</label>
+      <input id="modelX" type="range" min="-160" max="160" step="1" value="0">
+    </div>
+    <div>
+      <label>模型 Y</label>
+      <input id="modelY" type="range" min="-160" max="160" step="1" value="0">
+    </div>
+    <div>
+      <label>模型 Z</label>
+      <input id="modelZ" type="range" min="-160" max="160" step="1" value="0">
+    </div>
+  </div>
+
+  <div class="checks blk">
+    <label><input id="showCapsules" type="checkbox" checked>显示胶囊</label>
+    <label><input id="showLinks" type="checkbox" checked>父子连线</label>
+    <label><input id="showGround" type="checkbox" checked>地面</label>
+    <label><input id="showNames" type="checkbox">显示名称</label>
+    <label><input id="isolateSelected" type="checkbox">仅显示选中</label>
+    <label><input id="dimOthers" type="checkbox" checked>弱化未选中</label>
+  </div>
+
+  <div class="rowbtns2 blk">
+    <button id="fitBtn">适配当前视图</button>
+    <button id="resetBtn">重置初始值</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="blk">
+    <label>筛选骨骼 / body</label>
+    <input id="filterInput" type="text" placeholder="输入名称，例如 Thigh / Spine / Hand">
+  </div>
+
+  <div class="blk">
+    <label>批量搜索并自动选中同名骨骼</label>
+    <input id="multiSearchInput" type="text" placeholder="输入多个完整名字，用逗号 / 空格 / 换行分隔，例如 c5080_L_Hand, L_Hand">
+    <div class="rowbtns2" style="margin-top:8px;">
+      <button id="multiSearchBtn">搜索并选中</button>
+      <button id="clearSearchBtn">清空搜索框</button>
+    </div>
+    <div class="small" style="margin-top:6px;">
+      会按你输入的多个名字对 <span class="mono">name</span> 和 <span class="mono">masterBone</span> 做
+      <b>完全匹配</b>，不会再做近似包含匹配。
+    </div>
+  </div>
+
+  <div class="blk">
+    <label>预设骨骼组</label>
+    <div id="groupPanel"></div>
+    <div class="small" style="margin-top:6px;">
+      每个组都可以先展开排查，再点击按钮自动选中本组全部骨骼。
+    </div>
+  </div>
+
+  <div class="blk">
+    <label>精确 Ragdoll 列表（48 根，可多选）</label>
+    <select id="boneList" size="14" multiple></select>
+    <div class="small" style="margin-top:6px;">左侧列表支持 <span class="kbd">Ctrl</span>/<span class="kbd">Shift</span> 多选；最后一次选中的会作为“主选中”。</div>
+  </div>
+
+  <div class="rowbtns blk">
+    <button id="prevBtn">上一根</button>
+    <button id="nextBtn">下一根</button>
+    <button id="clearBtn">清除选中</button>
+  </div>
+
+  <div class="rowbtns2 blk">
+    <button id="centerSelBtn">居中选中</button>
+    <button id="fitSelBtn">适配选中</button>
+  </div>
+
+  <div class="small">
+    操作：左键拖动旋转，右键拖动平移视图，滚轮平行缩放。<br>
+    <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> 平移模型，
+    <span class="kbd">Q</span><span class="kbd">E</span> 上下移动。<br>
+    也可以直接 <b>点击胶囊</b> 选中。
+  </div>
+</div>
+
+<div class="stats">
+  <h2>当前信息</h2>
+  <div id="stat1" class="statline"></div>
+  <div id="stat2" class="statline"></div>
+  <div id="stat3" class="statline"></div>
+  <div id="stat4" class="statline"></div>
+  <div id="stat5" class="statline"></div>
+  <div id="stat6" class="statline mono"></div>
+  <div id="stat7" class="statline mono"></div>
+</div>
+
+<div class="hint">
+  这一版的思路变了：<br>
+  上一版是“根据节点包围盒猜胶囊”，这一版是“直接用 HKX 里的 ragdoll body + capsule shape”。<br>
+  所以如果你之前觉得有些骨骼位置不对，这版应该会明显更准。
+</div>
+
+<script>
+const CAPS = [{"i":0,"name":"Ragdoll_c5081_Pelvis","parent":-1,"masterBone":"c5081_Pelvis","center":[-4.2497823e-09,2.0773997,1.3467999],"quat":[0.49999833,0.50000143,-0.49999917,0.50000095],"a":[0.11952154501001833,2.0773993613865582,1.3697984139722155],"b":[-0.11952134980871919,2.0774000771745498,1.3698019950077565],"radius":0.38687855,"length":0.23904289484663246},{"i":1,"name":"Ragdoll_c5081_L_Thigh","parent":0,"masterBone":"c5081_L_Thigh","center":[0.3141229,2.0774002,1.3467997],"quat":[0.70556873,-0.6997348,-0.064728595,-0.09140054],"a":[0.31833942722721176,1.7446451295677916,1.272016749474219],"b":[0.3211666948450533,1.521545922537351,1.221876739819997],"radius":0.29165927,"length":0.2286815912746798},{"i":2,"name":"Ragdoll_c5081_R_Thigh","parent":0,"masterBone":"c5081_R_Thigh","center":[-0.31412265,2.0773993,1.3467997],"quat":[-0.6997356,0.7055681,0.09139961,0.06472943],"a":[-0.3183193819635262,1.7461802472344425,1.2723623098440826],"b":[-0.32118443421329695,1.5200088680108776,1.2215318569494942],"radius":0.28993472,"length":0.2318306197329259},{"i":3,"name":"Ragdoll_c5081_Spine","parent":0,"masterBone":"c5081_Spine","center":[1.1218723e-07,2.0773842,0.970951],"quat":[0.50005466,0.5000557,-0.4999444,0.49994516],"a":[-2.624116848182797e-05,1.5617521901810443,0.9034789633460255],"b":[-2.877452753572074e-05,2.154212045219243,0.9036112818140342],"radius":0.38756976,"length":0.5924598698194486},{"i":4,"name":"Ragdoll_c5081_Tail","parent":0,"masterBone":"c5081_Tail","center":[-4.726905e-08,2.2699542,1.5770847],"quat":[-0.2649557,-0.26495773,-0.65558875,0.65559065],"a":[7.533367664978126e-07,2.0713436492443074,1.6827411400528716],"b":[2.0365568047237512e-07,1.7924624681728702,1.8311008922203398],"radius":0.1683047,"length":0.31588815935279124},{"i":5,"name":"Ragdoll_c5081_L_Calf","parent":1,"masterBone":"c5081_L_Calf","center":[0.32379025,1.3145443,1.1753561],"quat":[-0.6806472,0.6849328,-0.19681634,-0.16985196],"a":[0.3146110709319563,0.8655794544896662,1.4614436176629655],"b":[0.3196501530226466,1.2276743705850968,1.2922377935523568],"radius":0.1841452,"length":0.3997108098656125},{"i":6,"name":"Ragdoll_c5081_R_Calf","parent":2,"masterBone":"c5081_R_Calf","center":[-0.32378826,1.3145429,1.1753561],"quat":[0.68493384,-0.68064606,0.16985242,0.19681628],"a":[-0.31451443652355804,0.8644169738751162,1.4639970200605903],"b":[-0.31980816459386924,1.2235035468589905,1.2884995241686852],"radius":0.1841432,"length":0.3997130990079197},{"i":7,"name":"Ragdoll_c5081_Spine1","parent":3,"masterBone":"c5081_Spine1","center":[2.830478e-07,2.0774758,0.5588584],"quat":[0.50005156,0.5000521,-0.49994797,0.49994826],"a":[0.013867200264707983,1.467875917059966,0.3671948376103693],"b":[0.013865033887555597,2.1412433913743945,0.36733623240806235],"radius":0.422916,"length":0.673367489163068},{"i":8,"name":"Ragdoll_c5081_Tail1","parent":4,"masterBone":"c5081_Tail1","center":[2.0625447e-07,2.084947,1.7555323],"quat":[-0.139033,-0.13903517,-0.6933025,0.69330406],"a":[1.2043262741954597e-06,1.534888915912352,1.9515089681595015],"b":[1.6942293337579738e-06,1.273603136453023,2.0606957771772363],"radius":0.15770915,"length":0.28318195177550504},{"i":9,"name":"Ragdoll_c5081_L_Foot","parent":5,"masterBone":"c5081_L_Foot","center":[0.31412247,0.78290045,1.4828429],"quat":[0.57010454,-0.5701038,0.41830784,0.41830721],"a":[0.31412299908519875,0.37692923862812056,1.4782221341340622],"b":[0.3141225839485125,0.6700425595872642,1.516616158949654],"radius":0.12869959,"length":0.2956171849967633},{"i":10,"name":"Ragdoll_c5081_R_Foot","parent":6,"masterBone":"c5081_R_Foot","center":[-0.31411892,0.7828993,1.4828428],"quat":[0.5701045,-0.57010365,0.41830805,0.41830736],"a":[-0.3141184895342442,0.3808468461046069,1.4782621897929948],"b":[-0.3141184845876446,0.6741441266521059,1.5166765622842673],"radius":0.12870584,"length":0.29580222918439375},{"i":11,"name":"Ragdoll_c5081_Spine2","parent":7,"masterBone":"c5081_Spine2","center":[1.9675954e-07,2.077585,0.03243482],"quat":[0.49623653,0.496236,-0.50373584,0.5037355],"a":[0.0035255467352415895,2.1260693358983866,-0.20630684618304374],"b":[0.0035250238613929743,1.526098242399624,-0.1973073021323353],"radius":0.43258056,"length":0.6000385861155055},{"i":12,"name":"Ragdoll_Pelvis","parent":7,"masterBone":"Root","center":[-2.9386925e-07,2.7351997,0.21060005],"quat":[0.7071072,0.7071063,1.6012834e-06,1.8850801e-06],"a":[-0.1699344588786831,2.7351996778021412,0.21059919724597628],"b":[0.16993393113971644,2.735199275197815,0.21060087295450425],"radius":0.24106574,"length":0.33986839002276903},{"i":13,"name":"Ragdoll_c5081_L_Toe0","parent":9,"masterBone":"c5081_L_Toe0","center":[0.3141231,0.2919561,1.4859333],"quat":[0.70710295,-0.707102,-0.0024528578,-0.0024589747],"a":[0.3141218471796432,0.24939308212610967,1.4635603254790137],"b":[0.3141217654141219,0.12439393360001058,1.431469846124651],"radius":0.14792347,"length":0.12905264816131923},{"i":14,"name":"Ragdoll_c5081_R_Toe0","parent":10,"masterBone":"c5081_R_Toe0","center":[-0.31411818,0.2919551,1.4859334],"quat":[0.7071031,-0.7071019,-0.0024526694,-0.0024587235],"a":[-0.3141149844298032,0.25077999048454214,1.4622534534260423],"b":[-0.31411585765349764,0.12582768855447526,1.4254845896437849],"radius":0.14731763,"length":0.13024986411594952},{"i":15,"name":"Ragdoll_c5081_L_Clavicle","parent":11,"masterBone":"c5081_L_Clavicle","center":[0.23127718,2.204498,-0.37217236],"quat":[-0.37479642,0.60071003,-0.25543612,0.658352],"a":[0.28177313290757194,2.1219326117927415,-0.4516190065883523],"b":[0.3115635063721669,2.0769231868064733,-0.507474703990326],"radius":0.21715188,"length":0.0776735065579983},{"i":16,"name":"Ragdoll_c5081_Neck","parent":11,"masterBone":"c5081_Neck","center":[1.2941346e-07,2.1121411,-0.63485503],"quat":[0.6392143,0.63933235,-0.3022237,0.3021921],"a":[-0.1143353212555081,2.314675007072674,-0.6884761943755798],"b":[0.11427031984825856,2.314702883414119,-0.6885015147355249],"radius":0.3216972,"length":0.228605644205639},{"i":17,"name":"Ragdoll_c5081_R_Clavicle","parent":11,"masterBone":"c5081_R_Clavicle","center":[-0.23127808,2.2044973,-0.37217236],"quat":[-0.60071063,0.3747956,0.6583514,-0.25543728],"a":[-0.24609292536577387,2.1255654988009725,-0.4544196219609119],"b":[-0.2558806929177918,2.073262803127847,-0.5091978683532138],"radius":0.21780413,"length":0.0763677199223837},{"i":18,"name":"Ragdoll_L_Thigh","parent":12,"masterBone":"L_Thigh","center":[0.20669782,2.7352,0.2106003],"quat":[0.749519,-0.5144229,0.07082886,-0.41057724],"a":[0.34865112025054,2.47967381750971,0.11315813745428828],"b":[0.4365165926086321,2.3215097799923634,0.052843881131834275],"radius":0.23364007,"length":0.1907197250213779},{"i":19,"name":"Ragdoll_R_Thigh","parent":12,"masterBone":"R_Thigh","center":[-0.20669794,2.7351995,0.21059953],"quat":[-0.51442343,0.7495195,0.41057566,-0.07082755],"a":[-0.3497634813362489,2.477670212167911,0.11239245716752695],"b":[-0.43799115365370067,2.318854832725175,0.05183118441417692],"radius":0.23324749,"length":0.19150486852192958},{"i":20,"name":"Ragdoll_Spine","parent":12,"masterBone":"Spine","center":[-2.671459e-07,2.9441526,0.21055755],"quat":[0.70710635,0.7071071,4.8298625e-07,7.0497083e-07],"a":[-0.1718452281867717,2.9922333217794277,0.21055366910311826],"b":[0.17184463719497348,2.9922316944368585,0.21055467656118362],"radius":0.15515497,"length":0.3436898653870744},{"i":21,"name":"Ragdoll_c5081_L_UpperArm","parent":15,"masterBone":"c5081_L_UpperArm","center":[0.32823458,1.688468,-0.7654389],"quat":[-0.20430063,-0.24233186,-0.6642352,0.6769992],"a":[0.3262412368476588,1.5760663128917645,-0.6369114814129974],"b":[0.32256236634278723,1.8783912783122485,-0.783405924281417],"radius":0.19800615,"length":0.3359680648454807},{"i":22,"name":"Ragdoll_c5081_Neck1","parent":16,"masterBone":"c5081_Neck1","center":[-1.5981344e-07,2.4045045,-0.98985445],"quat":[0.6382313,0.6382318,-0.30440256,0.30440104],"a":[-0.038386387836923656,2.476881178311709,-1.0792236221843872],"b":[0.038385901889291335,2.4768804306850587,-1.079222057077181],"radius":0.32661366,"length":0.0767722897458087},{"i":23,"name":"Ragdoll_c5081_R_UpperArm","parent":17,"masterBone":"c5081_R_UpperArm","center":[-0.32823384,1.6884673,-0.7654388],"quat":[-0.24233185,-0.20430106,-0.67699766,0.6642368],"a":[-0.3262088837386753,1.5796311365320683,-0.6388954601270469],"b":[-0.32253008849035214,1.8819610603528192,-0.7853925317343435],"radius":0.19800618,"length":0.33597367212544127},{"i":24,"name":"Ragdoll_L_Calf","parent":18,"masterBone":"L_Calf","center":[0.49302438,2.2197926,0.014055148],"quat":[0.6456737,-0.6411986,0.38717046,-0.14855586],"a":[0.4890756933661868,2.0791563475396897,0.04543902347900544],"b":[0.4440345084782126,1.7312030823869633,0.15962150311204737],"radius":0.12451553,"length":0.3689685917821546},{"i":25,"name":"Ragdoll_R_Calf","parent":19,"masterBone":"R_Calf","center":[-0.4930237,2.219792,0.014054298],"quat":[-0.64119905,0.64567393,0.14855483,-0.38716963],"a":[-0.48766847715811285,2.08205716761578,0.046332200023325186],"b":[-0.44227741968257495,1.7314002292469757,0.1614012677918206],"radius":0.1230824,"length":0.371835349156104},{"i":26,"name":"Ragdoll_Spine1","parent":20,"masterBone":"Spine1","center":[-4.092463e-07,3.0913637,0.2105575],"quat":[0.7071063,0.707107,0.00041451099,-0.00037707703],"a":[-0.13712860143592648,3.276635570681221,0.21060413593390323],"b":[0.1371275525347181,3.276635849698999,0.21061865509893454],"radius":0.16187188,"length":0.27425615435510997},{"i":27,"name":"Ragdoll_c5081_L_Forearm","parent":21,"masterBone":"c5081_L_Forearm","center":[0.32829362,1.3348576,-0.5005591],"quat":[0.00486898,-0.027565014,-0.694927,0.71853524],"a":[0.34331210423087843,0.8848843834624116,-0.4927865863916964],"b":[0.33408640293017167,1.259652845140767,-0.5715942252546234],"radius":0.15840694,"length":0.38307591594408574},{"i":28,"name":"Ragdoll_c5081_Neck2","parent":22,"masterBone":"c5081_Neck2","center":[-9.4549e-07,2.6040964,-1.2359225],"quat":[0.61798006,0.6179801,-0.34365824,0.34365705],"a":[0.005473118808376342,2.7475256224119176,-1.4668587694894744],"b":[0.029896838233000437,2.747971343723217,-1.4675794048786175],"radius":0.26928127,"length":0.024438413479278734},{"i":29,"name":"Ragdoll_c5081_R_Forearm","parent":23,"masterBone":"c5081_R_Forearm","center":[-0.32829198,1.3348567,-0.50055873],"quat":[-0.027564853,0.0048686597,-0.7185341,0.69492817],"a":[-0.34320639936882924,0.8814203235156358,-0.4879973617557182],"b":[-0.3343218154332048,1.2550315403310643,-0.5733910923266544],"radius":0.1583219,"length":0.3833488833723609},{"i":30,"name":"Ragdoll_L_Foot","parent":24,"masterBone":"L_Foot","center":[0.41840842,1.6433675,0.20321193],"quat":[0.67130065,-0.67106855,0.22254953,-0.22247267],"a":[0.40757944935320767,1.533061492270606,0.217830317350064],"b":[0.5553759613677687,1.5329935677193869,0.01936334540857626],"radius":0.08786426,"length":0.24745292992615428},{"i":31,"name":"Ragdoll_R_Foot","parent":25,"masterBone":"R_Foot","center":[-0.41840777,1.6433668,0.20321114],"quat":[0.6713389,-0.6711071,-0.22243325,0.22235705],"a":[-0.553553622983207,1.5331221864558828,0.02175815635927661],"b":[-0.4072742432031525,1.5331881331006485,0.2180467495783956],"radius":0.08910015,"length":0.24479965916180957},{"i":32,"name":"Ragdoll_Spine2","parent":26,"masterBone":"Spine2","center":[-5.496481e-07,3.2385855,0.21072231],"quat":[0.70696074,0.7069612,-0.014358894,0.014356528],"a":[-0.05299998338329361,3.468023258133918,0.20650894779560797],"b":[0.05299868024662956,3.468022270585853,0.20650926817447446],"radius":0.21200062,"length":0.10599866363500764},{"i":33,"name":"Ragdoll_c5081_L_Hand","parent":27,"masterBone":"c5081_L_Hand","center":[0.3462726,0.78450626,-0.48246306],"quat":[-0.00668597,0.010519221,-0.70353717,0.7105491],"a":[0.3474021916181181,0.7077381073770767,-0.46753459633491923],"b":[0.3513511621350091,0.3068153411776752,-0.4697567858545763],"radius":0.105575785,"length":0.40094837192758925},{"i":34,"name":"Ragdoll_c5081_Head","parent":28,"masterBone":"c5081_Head","center":[1.9680778e-05,2.8378997,-1.5690999],"quat":[0.6459236,0.6459238,-0.28772017,0.2877189],"a":[1.8949063141833516e-05,2.869089113286485,-1.7926944582938134],"b":[1.9170492105500227e-05,2.428466751758803,-1.9528922887027038],"radius":0.23701745,"length":0.46884049563363855},{"i":35,"name":"Ragdoll_c5081_R_Hand","parent":29,"masterBone":"c5081_R_Hand","center":[-0.34626934,0.78450525,-0.4824627],"quat":[0.010518424,-0.006685477,-0.710548,0.7035383],"a":[-0.3473451829689744,0.7078030478605469,-0.46973061716700604],"b":[-0.3512938246670351,0.3066416655812452,-0.47195338485675004],"radius":0.10590637,"length":0.40118697274425835},{"i":36,"name":"Ragdoll_L_Clavicle","parent":32,"masterBone":"L_Clavicle","center":[0.028645996,3.460177,0.27477264],"quat":[-0.026577676,-6.320745e-07,3.1307968e-07,0.9996467],"a":[0.09534699908052435,3.621523874836763,0.27537840482302933],"b":[0.21518425164368687,3.591495150478479,0.2769757528829566],"radius":0.07920447,"length":0.12355259167373843},{"i":37,"name":"Ragdoll_Neck","parent":32,"masterBone":"Neck","center":[-6.3333795e-07,3.5895665,0.24317235],"quat":[0.6988982,0.6990166,-0.10705493,0.10703395],"a":[-1.7797104296853894e-05,3.685858231588292,0.21297030194339858],"b":[-1.817095928997066e-05,3.68795744419512,0.21231187535445456],"radius":0.059399977,"length":0.0022000498361313538},{"i":38,"name":"Ragdoll_R_Clavicle","parent":32,"masterBone":"R_Clavicle","center":[-0.028647624,3.4601765,0.27477264],"quat":[-6.8968774e-07,0.02030438,0.99979377,-2.9815294e-07],"a":[-0.2481876868863072,3.598356418551955,0.27647805014151405],"b":[-0.07899986898312113,3.6361106773348073,0.2749439323699119],"radius":0.069303975,"length":0.17335586318443738},{"i":39,"name":"Ragdoll_c5081_L Finger0","parent":33,"masterBone":"c5081_L Finger0","center":[0.3511872,0.28556782,-0.4852281],"quat":[0.0028155318,0.00096175884,-0.70664257,0.7075643],"a":[0.35123845241480717,0.22011511095640418,-0.47253630868613755],"b":[0.351482016647684,0.11726528734264394,-0.5147321246195601],"radius":0.12771927,"length":0.11116938617804996},{"i":40,"name":"Ragdoll_c5081_R Finger0","parent":35,"masterBone":"c5081_R Finger0","center":[-0.3511823,0.28556675,-0.48522753],"quat":[0.00096523855,0.0028115842,-0.7075629,0.70664406],"a":[-0.3514707622778422,0.11779479902699536,-0.5134667780940682],"b":[-0.35123544453213246,0.21955328777882716,-0.47378127032940054],"radius":0.12868457,"length":0.10922355484984737},{"i":41,"name":"Ragdoll_L_UpperArm","parent":36,"masterBone":"L_UpperArm","center":[0.313515,3.460177,0.2747731],"quat":[-0.0020822927,-0.008505381,-0.35719115,0.9339902],"a":[0.33532137587128297,3.47499858376611,0.2749392904963515],"b":[0.524883006073104,3.305162030445651,0.2793626676054931],"radius":0.11872288,"length":0.254553791473619},{"i":42,"name":"Ragdoll_Head","parent":37,"masterBone":"Head","center":[2.0461175e-05,3.724499,0.21059966],"quat":[0.7070026,0.70700294,-0.012127812,0.012126801],"a":[1.999038409242489e-05,3.8996623278249363,0.15802309443861834],"b":[2.065251638872954e-05,3.8769777410960393,0.162832314367589],"radius":0.16290952,"length":0.02318877038189984},{"i":43,"name":"Ragdoll_R_UpperArm","parent":38,"masterBone":"R_UpperArm","center":[-0.31351665,3.4601767,0.27477217],"quat":[0.006262771,-0.003778333,0.93398434,-0.35723895],"a":[-0.33786652727892874,3.4901493456107255,0.27520044608642524],"b":[-0.5274017669230087,3.32029404923448,0.27749035249018256],"radius":0.118740655,"length":0.25451851100723294},{"i":44,"name":"Ragdoll_L_Forearm","parent":41,"masterBone":"L_Forearm","center":[0.6050675,3.1988971,0.27808934],"quat":[0.01697665,0.02742372,-0.3568606,0.9336006],"a":[0.643888969748445,3.1861956569051912,0.2759160886566455],"b":[0.8697922355442227,2.9841029886700015,0.25668410310218154],"radius":0.088641666,"length":0.30371631717769687},{"i":45,"name":"Ragdoll_R_Forearm","parent":43,"masterBone":"R_Forearm","center":[-0.60506874,3.198899,0.27829528],"quat":[-0.027282981,-0.016604993,0.93360704,-0.35687235],"a":[-0.8418917684649118,2.9836759046779884,0.25813222595674135],"b":[-0.6299987760352497,3.199122423436436,0.2773301702971985],"radius":0.08910289,"length":0.3027943258266745},{"i":46,"name":"Ragdoll_L_Hand","parent":44,"masterBone":"L_Hand","center":[0.8996563,2.935358,0.25300983],"quat":[0.64436585,-0.3010419,-0.30012196,0.6356832],"a":[1.0610564135376859,2.7376894770090905,0.19898854787862685],"b":[0.9378153225830911,2.8858899632729056,0.21663811854907475],"radius":0.12672272,"length":0.19355427655663174},{"i":47,"name":"Ragdoll_R_Hand","parent":45,"masterBone":"R_Hand","center":[-0.89965737,2.9353402,0.25342473],"quat":[-0.30116084,0.64411247,-0.63593954,0.3000035],"a":[-0.9400460153348763,2.887107486033682,0.2282300223405802],"b":[-1.063315302120885,2.738842437268692,0.21162129990181433],"radius":0.12672734,"length":0.19352956211148759}];
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+const UI = {
+  preset: document.getElementById('preset'),
+  zoom: document.getElementById('zoom'),
+  segments: document.getElementById('segments'),
+  capSteps: document.getElementById('capSteps'),
+  pickRadius: document.getElementById('pickRadius'),
+  modelX: document.getElementById('modelX'),
+  modelY: document.getElementById('modelY'),
+  modelZ: document.getElementById('modelZ'),
+  showCapsules: document.getElementById('showCapsules'),
+  showLinks: document.getElementById('showLinks'),
+  showGround: document.getElementById('showGround'),
+  showNames: document.getElementById('showNames'),
+  isolateSelected: document.getElementById('isolateSelected'),
+  dimOthers: document.getElementById('dimOthers'),
+  fitBtn: document.getElementById('fitBtn'),
+  resetBtn: document.getElementById('resetBtn'),
+  filterInput: document.getElementById('filterInput'),
+  multiSearchInput: document.getElementById('multiSearchInput'),
+  multiSearchBtn: document.getElementById('multiSearchBtn'),
+  clearSearchBtn: document.getElementById('clearSearchBtn'),
+  groupPanel: document.getElementById('groupPanel'),
+  boneList: document.getElementById('boneList'),
+  prevBtn: document.getElementById('prevBtn'),
+  nextBtn: document.getElementById('nextBtn'),
+  clearBtn: document.getElementById('clearBtn'),
+  centerSelBtn: document.getElementById('centerSelBtn'),
+  fitSelBtn: document.getElementById('fitSelBtn'),
+};
+
+const ST = {
+  yaw: -0.82,
+  pitch: 0.33,
+  panX: 0,
+  panY: 10,
+  zoom: 70,
+  target: [0, 2.0, 1.1],
+  modelOffset: [0,0,0],
+  drag: false,
+  panMode: false,
+  lx: 0,
+  ly: 0,
+  selectedIndex: -1,
+  selectedIndices: [],
+  filtered: [],
+  pickRecords: []
+};
+
+const GROUPS = [
+  { id: 0, label: 'group 0', terms: ['Pelvis'] },
+  { id: 1, label: 'group 1', terms: ['c5081_Neck', 'c5081_Neck1', 'c5081_Neck2', 'c5081_Head'] },
+  { id: 2, label: 'group 2', terms: ['Spine', 'Spine1', 'Spine2', 'L_Clavicle', 'Neck', 'R_Clavicle', 'L_UpperArm', 'Head', 'R_UpperArm'] },
+  { id: 3, label: 'group 3', terms: ['c5081_Spine1', 'c5081_Spine2', 'c5081_L_Clavicle', 'c5081_R_Clavicle', 'L_Thigh', 'R_Thigh', 'c5081_L_UpperArm', 'c5081_R_UpperArm', 'L_Calf', 'R_Calf', 'c5081_L_Forearm', 'c5081_R_Forearm', 'L_Foot', 'R_Foot', 'c5081_L_Hand', 'c5081_R_Hand', 'c5081_L Finger0', 'c5081_R Finger0', 'L_Forearm', 'R_Forearm', 'L_Hand', 'R_Hand'] },
+  { id: 4, label: 'group 4', terms: ['c5081_Pelvis', 'c5081_L_Thigh', 'c5081_R_Thigh', 'c5081_Spine', 'c5081_Tail', 'c5081_L_Calf', 'c5081_R_Calf', 'c5081_Tail1', 'c5081_L_Foot', 'c5081_R_Foot', 'c5081_L_Toe0', 'c5081_R_Toe0'] }
+];
+
+function resize() {
+  cv.width = innerWidth * devicePixelRatio;
+  cv.height = innerHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+addEventListener('resize', resize);
+resize();
+
+function add(a,b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+function sub(a,b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+function mul(v,s) { return [v[0]*s, v[1]*s, v[2]*s]; }
+function len(v) { return Math.hypot(v[0], v[1], v[2]); }
+
+function hasSelection() {
+  return ST.selectedIndices.length > 0;
+}
+
+function isSelected(i) {
+  return ST.selectedIndices.includes(i);
+}
+
+function setSelection(indices, primary=null) {
+  const uniq = [...new Set(indices.filter(v => Number.isInteger(v) && v >= 0 && v < CAPS.length))];
+  ST.selectedIndices = uniq;
+  if (!uniq.length) {
+    ST.selectedIndex = -1;
+    return;
+  }
+  if (primary !== null && uniq.includes(primary)) {
+    ST.selectedIndex = primary;
+  } else if (uniq.includes(ST.selectedIndex)) {
+    // keep current primary
+  } else {
+    ST.selectedIndex = uniq[uniq.length - 1];
+  }
+}
+
+function visibleCap(i) {
+  if (UI.isolateSelected.checked && hasSelection()) return isSelected(i);
+  return true;
+}
+
+function parseMultiTerms(raw) {
+  return raw
+    .split(/[\n,，;；\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function findMatchingIndices(terms) {
+  const normalized = terms.map(t => t.trim().toLowerCase()).filter(Boolean);
+  const hits = [];
+  CAPS.forEach((cap, i) => {
+    const name = String(cap.name || '').trim().toLowerCase();
+    const masterBone = String(cap.masterBone || '').trim().toLowerCase();
+    if (normalized.some(t => t === name || t === masterBone)) hits.push(i);
+  });
+  return hits;
+}
+
+function findGroupMatchingIndices(terms) {
+  const normalized = terms.map(t => t.trim().toLowerCase()).filter(Boolean);
+  const hits = [];
+  CAPS.forEach((cap, i) => {
+    const name = String(cap.name || '').trim().toLowerCase();
+    const strippedName = name.startsWith('ragdoll_') ? name.slice(8) : name;
+    const masterBone = String(cap.masterBone || '').trim().toLowerCase();
+    if (normalized.some(t => t === name || t === strippedName || t === masterBone)) hits.push(i);
+  });
+  return hits;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function renderGroupPanel() {
+  UI.groupPanel.innerHTML = GROUPS.map(group => {
+    const hits = findGroupMatchingIndices(group.terms);
+    const hitLines = hits.length
+      ? hits.map(i => `[${i}] ${CAPS[i].name} -> ${CAPS[i].masterBone}`).join('\n')
+      : '未匹配到骨骼';
+    return `
+      <details class="groupBox">
+        <summary>${group.label}（${group.terms.length} 项，命中 ${hits.length} 根）</summary>
+        <div class="groupBody">
+          <div class="groupTerms"><b>目标名：</b> ${escapeHtml(group.terms.join('  '))}</div>
+          <div class="groupHits"><b>排查结果：</b>\n${escapeHtml(hitLines)}</div>
+          <div class="groupBtns">
+            <button type="button" data-group-id="${group.id}" class="groupSelectBtn">选择 ${group.label}</button>
+          </div>
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+function worldPt(p) {
+  return add(p, ST.modelOffset);
+}
+
+function cameraTransform(pt) {
+  const p = sub(pt, ST.target);
+  const cy = Math.cos(ST.yaw), sy = Math.sin(ST.yaw);
+  const cp = Math.cos(ST.pitch), sp = Math.sin(ST.pitch);
+
+  let x1 = cy*p[0] + sy*p[2];
+  let z1 = -sy*p[0] + cy*p[2];
+  let y1 = p[1];
+
+  let y2 = cp*y1 - sp*z1;
+  let z2 = sp*y1 + cp*z1;
+  return [x1, y2, z2];
+}
+
+function project(pt) {
+  const c = cameraTransform(pt);
+  return {
+    x: cv.clientWidth * 0.5 + c[0] * ST.zoom + ST.panX,
+    y: cv.clientHeight * 0.5 - c[1] * ST.zoom + ST.panY,
+    z: c[2]
+  };
+}
+
+function drawLine3(a, b, alpha=1, width=1) {
+  const A = project(a), B = project(b);
+  ctx.globalAlpha = alpha;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(A.x, A.y);
+  ctx.lineTo(B.x, B.y);
+  ctx.stroke();
+}
+
+function drawGround() {
+  if (!UI.showGround.checked) return;
+  const gy = -0.9;
+  ctx.strokeStyle = 'rgba(255,154,77,0.18)';
+  for (let i=-40;i<=40;i++) {
+    drawLine3([-40, gy, i], [40, gy, i], 1, 1);
+    drawLine3([i, gy, -40], [i, gy, 40], 1, 1);
+  }
+}
+
+function ringFrame(a, b) {
+  const axis = sub(b, a);
+  const L = len(axis) || 1;
+  const n = [axis[0]/L, axis[1]/L, axis[2]/L];
+  let tmp = Math.abs(n[1]) < 0.92 ? [0,1,0] : [1,0,0];
+  let u = [
+    n[1]*tmp[2] - n[2]*tmp[1],
+    n[2]*tmp[0] - n[0]*tmp[2],
+    n[0]*tmp[1] - n[1]*tmp[0]
+  ];
+  const ul = len(u) || 1;
+  u = [u[0]/ul, u[1]/ul, u[2]/ul];
+  let v = [
+    n[1]*u[2] - n[2]*u[1],
+    n[2]*u[0] - n[0]*u[2],
+    n[0]*u[1] - n[1]*u[0]
+  ];
+  return { n, u, v };
+}
+
+function makeCapsuleRings(a, b, radius, segs, capSteps) {
+  const frame = ringFrame(a, b);
+  const A = a;
+  const B = b;
+  const rings = [];
+
+  rings.push({ pole: add(A, mul(frame.n, -radius)), r: 0 });
+  for (let s=capSteps-1; s>=1; s--) {
+    const t = s / capSteps;
+    const ang = t * Math.PI * 0.5;
+    rings.push({
+      c: add(A, mul(frame.n, -Math.sin(ang) * radius)),
+      r: Math.cos(ang) * radius
+    });
+  }
+  rings.push({ c: A, r: radius });
+
+  const mid = mul(add(A, B), 0.5);
+  rings.push({ c: mid, r: radius });
+
+  rings.push({ c: B, r: radius });
+  for (let s=1; s<=capSteps-1; s++) {
+    const t = s / capSteps;
+    const ang = t * Math.PI * 0.5;
+    rings.push({
+      c: add(B, mul(frame.n, Math.sin(ang) * radius)),
+      r: Math.cos(ang) * radius
+    });
+  }
+  rings.push({ pole: add(B, mul(frame.n, radius)), r: 0 });
+
+  return rings.map(ring => {
+    if (ring.pole) return { pole: ring.pole };
+    const pts = [];
+    for (let i=0; i<segs; i++) {
+      const ang = i / segs * Math.PI * 2;
+      const off = add(mul(frame.u, Math.cos(ang) * ring.r), mul(frame.v, Math.sin(ang) * ring.r));
+      pts.push(add(ring.c, off));
+    }
+    return { pts };
+  });
+}
+
+function drawCapsule(cap, selected) {
+  const a = worldPt(cap.a);
+  const b = worldPt(cap.b);
+  const rings = makeCapsuleRings(a, b, cap.radius, Number(UI.segments.value), Number(UI.capSteps.value));
+
+  if (selected) {
+    ctx.strokeStyle = 'rgba(255,241,223,0.98)';
+  } else {
+    const dim = UI.dimOthers.checked && hasSelection();
+    ctx.strokeStyle = dim ? 'rgba(255,154,77,0.34)' : 'rgba(255,154,77,0.95)';
+  }
+
+  const alpha = selected ? 1 : ((UI.dimOthers.checked && hasSelection()) ? 0.50 : 0.95);
+  const width = selected ? 1.7 : 1.0;
+
+  for (let r=0; r<rings.length; r++) {
+    const curr = rings[r];
+    if (curr.pts) {
+      for (let k=0; k<curr.pts.length; k++) {
+        drawLine3(curr.pts[k], curr.pts[(k+1)%curr.pts.length], alpha, width);
+      }
+    }
+    if (r < rings.length - 1) {
+      const next = rings[r+1];
+      if (curr.pts && next.pts) {
+        for (let k=0; k<curr.pts.length; k++) drawLine3(curr.pts[k], next.pts[k], alpha*0.9, width);
+      } else if (curr.pole && next.pts) {
+        for (let k=0; k<next.pts.length; k++) drawLine3(curr.pole, next.pts[k], alpha*0.9, width);
+      } else if (curr.pts && next.pole) {
+        for (let k=0; k<curr.pts.length; k++) drawLine3(curr.pts[k], next.pole, alpha*0.9, width);
+      }
+    }
+  }
+
+  const mid = project(worldPt(cap.center));
+  ST.pickRecords.push({ idx: cap.i, x: mid.x, y: mid.y });
+}
+
+function refreshList() {
+  const q = UI.filterInput.value.trim().toLowerCase();
+  UI.boneList.innerHTML = '';
+  ST.filtered = [];
+  CAPS.forEach((cap, i) => {
+    const txt = `[${i}] ${cap.name}  ->  ${cap.masterBone}`;
+    if (q && !txt.toLowerCase().includes(q)) return;
+    ST.filtered.push(i);
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = txt;
+    if (isSelected(i)) opt.selected = true;
+    UI.boneList.appendChild(opt);
+  });
+}
+
+function fit(selectionOnly=false, mult=1.15) {
+  let pts = [];
+  CAPS.forEach((cap, i) => {
+    if (selectionOnly && !isSelected(i)) return;
+    if (!selectionOnly && !visibleCap(i)) return;
+    const a = worldPt(cap.a), b = worldPt(cap.b), r = cap.radius;
+    pts.push(add(a, [ r, r, r]), add(a, [-r,-r,-r]), add(b, [ r, r, r]), add(b, [-r,-r,-r]));
+  });
+  if (!pts.length) return;
+
+  let cx=0, cy=0, cz=0;
+  pts.forEach(p => { cx += p[0]; cy += p[1]; cz += p[2]; });
+  ST.target = [cx/pts.length, cy/pts.length, cz/pts.length];
+
+  let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+  pts.forEach(p => {
+    const c = cameraTransform(p);
+    minX = Math.min(minX, c[0]); maxX = Math.max(maxX, c[0]);
+    minY = Math.min(minY, c[1]); maxY = Math.max(maxY, c[1]);
+  });
+  const spanX = Math.max(0.001, maxX - minX);
+  const spanY = Math.max(0.001, maxY - minY);
+  const margin = 120;
+  const zx = (cv.clientWidth - margin) / spanX;
+  const zy = (cv.clientHeight - margin) / spanY;
+  ST.zoom = Math.max(6, Math.min(260, Math.min(zx, zy) * mult));
+  UI.zoom.value = Math.round(ST.zoom);
+}
+
+function setPreset(name) {
+  if (name === 'game1') { ST.yaw = -0.82; ST.pitch = 0.34; ST.panX = 0; ST.panY = 14; }
+  if (name === 'game2') { ST.yaw = -0.18; ST.pitch = 0.22; ST.panX = 0; ST.panY = 18; }
+  if (name === 'side')  { ST.yaw = -1.57; ST.pitch = 0.12; ST.panX = 0; ST.panY = 0; }
+  if (name === 'front') { ST.yaw = 0.02; ST.pitch = 0.12; ST.panX = 0; ST.panY = 0; }
+  if (name === 'top')   { ST.yaw = -0.20; ST.pitch = 1.20; ST.panX = 0; ST.panY = 0; }
+}
+
+function syncOffsetFromSliders() {
+  ST.modelOffset = [
+    Number(UI.modelX.value) / 10,
+    Number(UI.modelY.value) / 10,
+    Number(UI.modelZ.value) / 10
+  ];
+}
+function syncSlidersFromOffset() {
+  UI.modelX.value = Math.round(ST.modelOffset[0] * 10);
+  UI.modelY.value = Math.round(ST.modelOffset[1] * 10);
+  UI.modelZ.value = Math.round(ST.modelOffset[2] * 10);
+}
+
+UI.filterInput.addEventListener('input', refreshList);
+
+UI.multiSearchBtn.addEventListener('click', () => {
+  const terms = parseMultiTerms(UI.multiSearchInput.value);
+  if (!terms.length) {
+    setSelection([], -1);
+    refreshList();
+    return;
+  }
+  const matches = findMatchingIndices(terms);
+  const primary = matches.length ? matches[matches.length - 1] : -1;
+  setSelection(matches, primary);
+  refreshList();
+});
+
+UI.clearSearchBtn.addEventListener('click', () => {
+  UI.multiSearchInput.value = '';
+});
+
+UI.multiSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    UI.multiSearchBtn.click();
+  }
+});
+
+UI.groupPanel.addEventListener('click', (e) => {
+  const btn = e.target.closest('.groupSelectBtn');
+  if (!btn) return;
+  const groupId = Number(btn.dataset.groupId);
+  const group = GROUPS.find(g => g.id === groupId);
+  if (!group) return;
+  const matches = findGroupMatchingIndices(group.terms);
+  const primary = matches.length ? matches[matches.length - 1] : -1;
+  setSelection(matches, primary);
+  refreshList();
+});
+
+UI.boneList.addEventListener('change', () => {
+  const vals = [...UI.boneList.selectedOptions].map(o => Number(o.value)).filter(v => !Number.isNaN(v));
+  const primary = vals.length ? vals[vals.length - 1] : -1;
+  setSelection(vals, primary);
+});
+UI.prevBtn.addEventListener('click', () => {
+  if (!ST.filtered.length) return;
+  let pos = Math.max(0, ST.filtered.indexOf(ST.selectedIndex));
+  pos = (pos - 1 + ST.filtered.length) % ST.filtered.length;
+  setSelection([ST.filtered[pos]], ST.filtered[pos]);
+  refreshList();
+});
+UI.nextBtn.addEventListener('click', () => {
+  if (!ST.filtered.length) return;
+  let pos = Math.max(0, ST.filtered.indexOf(ST.selectedIndex));
+  pos = (pos + 1) % ST.filtered.length;
+  setSelection([ST.filtered[pos]], ST.filtered[pos]);
+  refreshList();
+});
+UI.clearBtn.addEventListener('click', () => {
+  setSelection([], -1);
+  refreshList();
+});
+UI.centerSelBtn.addEventListener('click', () => {
+  if (!hasSelection()) return;
+  const chosen = CAPS.filter(cap => isSelected(cap.i));
+  const c = chosen.reduce((acc, cap) => [acc[0] + cap.center[0], acc[1] + cap.center[1], acc[2] + cap.center[2]], [0,0,0]);
+  ST.target = worldPt([c[0] / chosen.length, c[1] / chosen.length, c[2] / chosen.length]);
+});
+UI.fitSelBtn.addEventListener('click', () => {
+  if (!hasSelection()) return;
+  fit(true, 1.9);
+});
+UI.fitBtn.addEventListener('click', () => fit(false, 1.12));
+UI.resetBtn.addEventListener('click', () => {
+  ST.modelOffset = [0,0,0];
+  syncSlidersFromOffset();
+  setPreset('game1');
+  UI.preset.value = 'game1';
+  fit(false, 1.18);
+});
+UI.preset.addEventListener('change', () => {
+  setPreset(UI.preset.value);
+  fit(false, 1.14);
+});
+UI.zoom.addEventListener('input', () => ST.zoom = Number(UI.zoom.value));
+UI.modelX.addEventListener('input', syncOffsetFromSliders);
+UI.modelY.addEventListener('input', syncOffsetFromSliders);
+UI.modelZ.addEventListener('input', syncOffsetFromSliders);
+
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+let clickStartX = 0, clickStartY = 0, clickStartTime = 0;
+cv.addEventListener('mousedown', e => {
+  ST.drag = true;
+  ST.panMode = (e.button === 2) || e.shiftKey;
+  ST.lx = e.clientX;
+  ST.ly = e.clientY;
+  clickStartX = e.clientX;
+  clickStartY = e.clientY;
+  clickStartTime = performance.now();
+});
+addEventListener('mouseup', e => {
+  if (ST.drag) {
+    const move = Math.hypot((e.clientX ?? clickStartX) - clickStartX, (e.clientY ?? clickStartY) - clickStartY);
+    const dt = performance.now() - clickStartTime;
+    if (move < 4 && dt < 320 && e.button === 0) pickNearest(e.clientX, e.clientY);
+  }
+  ST.drag = false;
+});
+addEventListener('mousemove', e => {
+  if (!ST.drag) return;
+  const dx = e.clientX - ST.lx;
+  const dy = e.clientY - ST.ly;
+  ST.lx = e.clientX;
+  ST.ly = e.clientY;
+  if (ST.panMode) {
+    ST.panX += dx;
+    ST.panY += dy;
+  } else {
+    ST.yaw += dx * 0.008;
+    ST.pitch += dy * 0.008;
+    ST.pitch = Math.max(-1.5, Math.min(1.5, ST.pitch));
+  }
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0014);
+  ST.zoom *= factor;
+  ST.zoom = Math.max(6, Math.min(260, ST.zoom));
+  UI.zoom.value = Math.round(ST.zoom);
+}, { passive:false });
+
+addEventListener('keydown', e => {
+  const step = e.shiftKey ? 0.45 : 0.18;
+  let used = true;
+  switch (e.key.toLowerCase()) {
+    case 'a': ST.modelOffset[0] -= step; break;
+    case 'd': ST.modelOffset[0] += step; break;
+    case 'w': ST.modelOffset[2] -= step; break;
+    case 's': ST.modelOffset[2] += step; break;
+    case 'q': ST.modelOffset[1] += step; break;
+    case 'e': ST.modelOffset[1] -= step; break;
+    default: used = false;
+  }
+  if (used) {
+    syncSlidersFromOffset();
+    e.preventDefault();
+  }
+});
+
+function pickNearest(x, y) {
+  let best = null;
+  let bestD = Infinity;
+  ST.pickRecords.forEach(r => {
+    const d = Math.hypot(r.x - x, r.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = r;
+    }
+  });
+  if (best && bestD <= Number(UI.pickRadius.value)) {
+    setSelection([best.idx], best.idx);
+    refreshList();
+  }
+}
+
+const stat1 = document.getElementById('stat1');
+const stat2 = document.getElementById('stat2');
+const stat3 = document.getElementById('stat3');
+const stat4 = document.getElementById('stat4');
+const stat5 = document.getElementById('stat5');
+const stat6 = document.getElementById('stat6');
+const stat7 = document.getElementById('stat7');
+
+function render() {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  ctx.clearRect(0, 0, w, h);
+
+  const tm = performance.now() * 0.018;
+  for (let i=0; i<60; i++) {
+    const x = (i * 173.31) % w;
+    const y = (tm + i * 63.1) % h;
+    const r = 0.7 + (i % 3) * 0.5;
+    ctx.fillStyle = 'rgba(255,255,255,.30)';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  drawGround();
+  ST.pickRecords = [];
+
+  let shown = 0;
+  let links = 0;
+
+  if (UI.showLinks.checked) {
+    CAPS.forEach(cap => {
+      if (!visibleCap(cap.i)) return;
+      if (cap.parent >= 0 && visibleCap(cap.parent)) {
+        const selected = isSelected(cap.i) || isSelected(cap.parent);
+        ctx.strokeStyle = selected ? 'rgba(255,241,223,0.88)' : 'rgba(255,154,77,0.30)';
+        const alpha = selected ? 0.9 : ((UI.dimOthers.checked && hasSelection()) ? 0.15 : 0.36);
+        const width = selected ? 1.5 : 1.0;
+        drawLine3(worldPt(CAPS[cap.parent].center), worldPt(cap.center), alpha, width);
+        links++;
+      }
+    });
+  }
+
+  if (UI.showCapsules.checked) {
+    CAPS.forEach(cap => {
+      if (!visibleCap(cap.i)) return;
+      shown++;
+      drawCapsule(cap, isSelected(cap.i));
+    });
+  }
+
+  if (UI.showNames.checked) {
+    ctx.fillStyle = 'rgba(255,240,230,.92)';
+    ctx.font = '11px system-ui';
+    CAPS.forEach(cap => {
+      if (!visibleCap(cap.i)) return;
+      const p = project(worldPt(cap.center));
+      ctx.fillText(cap.name, p.x + 5, p.y - 4);
+    });
+  }
+
+  stat1.textContent = `精确 body 数: ${CAPS.length}   当前显示: ${shown}`;
+  stat2.textContent = `父子连线: ${links}   平行缩放: ${ST.zoom.toFixed(1)}`;
+  stat3.textContent = `模型偏移: X ${ST.modelOffset[0].toFixed(1)} / Y ${ST.modelOffset[1].toFixed(1)} / Z ${ST.modelOffset[2].toFixed(1)}`;
+  if (hasSelection() && ST.selectedIndex >= 0) {
+    const cap = CAPS[ST.selectedIndex];
+    stat4.textContent = `已选 ${ST.selectedIndices.length} 根；主选中: [${cap.i}] ${cap.name}`;
+    stat5.textContent = `映射主骨: ${cap.masterBone}   parent=${cap.parent}`;
+    stat6.textContent = `radius=${cap.radius.toFixed(4)}   segment=${cap.length.toFixed(4)}`;
+    stat7.textContent = `多选索引: ${ST.selectedIndices.join(', ')}`;
+  } else {
+    stat4.textContent = '选中: 无';
+    stat5.textContent = '映射主骨: -';
+    stat6.textContent = '';
+    stat7.textContent = '';
+  }
+
+  requestAnimationFrame(render);
+}
+
+setPreset('game1');
+UI.preset.value = 'game1';
+syncOffsetFromSliders();
+refreshList();
+renderGroupPanel();
+fit(false, 1.18);
+render();
+</script>
+</body>
+</html>
