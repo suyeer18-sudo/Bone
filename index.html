@@ -98,6 +98,8 @@ select option:checked {
   .groupTerms { font-size:12px; color:var(--muted); line-height:1.55; white-space:pre-wrap; word-break:break-word; }
   .groupHits { font-size:12px; color:var(--text); line-height:1.55; margin-top:8px; white-space:pre-wrap; word-break:break-word; }
   .groupBtns { display:grid; grid-template-columns:1fr; gap:8px; margin-top:8px; }
+  .groupColorChip { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:7px; vertical-align:-1px; box-shadow:0 0 10px rgba(255,255,255,.25); }
+  .overlayActiveBtn { border-color:rgba(137,209,133,.48) !important; background:rgba(137,209,133,.14) !important; color:#eaffea !important; }
 </style>
 </head>
 <body>
@@ -198,9 +200,13 @@ select option:checked {
       <option value="damage">DamageGroup（部位倍率组）</option>
       <option value="part">PartGroup（抖动硬直组）</option>
     </select>
+    <div class="rowbtns2" style="margin-bottom:8px;">
+      <button id="showAllGroupsBtn" type="button">显示当前类型全部部位</button>
+      <button id="hideAllGroupsBtn" type="button">关闭部位着色</button>
+    </div>
     <div id="groupPanel"></div>
     <div class="small" style="margin-top:6px;">
-      可以在原有 DamageGroup 和新增 PartGroup（抖动硬直）之间切换；每个组都可以先展开排查，再点击按钮自动选中本组全部骨骼。
+      可以在原有 DamageGroup 和新增 PartGroup（抖动硬直）之间切换；“显示当前类型全部部位”会给当前类型的所有组分别上色并在中心写组名，DamageGroup 与 PartGroup 不会同时叠加显示。
     </div>
   </div>
 
@@ -268,6 +274,8 @@ const UI = {
   multiSearchBtn: document.getElementById('multiSearchBtn'),
   clearSearchBtn: document.getElementById('clearSearchBtn'),
   groupMode: document.getElementById('groupMode'),
+  showAllGroupsBtn: document.getElementById('showAllGroupsBtn'),
+  hideAllGroupsBtn: document.getElementById('hideAllGroupsBtn'),
   groupPanel: document.getElementById('groupPanel'),
   boneList: document.getElementById('boneList'),
   prevBtn: document.getElementById('prevBtn'),
@@ -292,7 +300,8 @@ const ST = {
   selectedIndex: -1,
   selectedIndices: [],
   filtered: [],
-  pickRecords: []
+  pickRecords: [],
+  groupOverlayMode: null
 };
 
 const DAMAGE_GROUPS = [
@@ -343,6 +352,45 @@ const PART_GROUPS = [
 
 function getActiveGroups() {
   return UI.groupMode && UI.groupMode.value === 'part' ? PART_GROUPS : DAMAGE_GROUPS;
+}
+
+const GROUP_COLORS = ['#ff5b5b', '#48d6ff', '#ffd24d', '#8cff6a', '#c78bff', '#ff8bd1', '#ff9a4d'];
+
+function getGroupModeName(mode) {
+  return mode === 'part' ? 'PartGroup（抖动硬直组）' : 'DamageGroup（部位倍率组）';
+}
+
+function getOverlayGroups() {
+  if (ST.groupOverlayMode === 'part') return PART_GROUPS;
+  if (ST.groupOverlayMode === 'damage') return DAMAGE_GROUPS;
+  return [];
+}
+
+function hexToRgba(hex, alpha=1) {
+  const clean = String(hex).replace('#', '');
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function updateGroupOverlayButtons() {
+  if (!UI.showAllGroupsBtn || !UI.hideAllGroupsBtn) return;
+  const activeMode = UI.groupMode.value;
+  const active = ST.groupOverlayMode === activeMode;
+  UI.showAllGroupsBtn.textContent = active ? `正在显示：${getGroupModeName(activeMode)}` : '显示当前类型全部部位';
+  UI.showAllGroupsBtn.classList.toggle('overlayActiveBtn', active);
+}
+
+function buildGroupOverlayMap(groups) {
+  const map = new Map();
+  groups.forEach((group, groupIndex) => {
+    const color = GROUP_COLORS[groupIndex % GROUP_COLORS.length];
+    findGroupMatchingIndices(group.terms).forEach(idx => {
+      if (!map.has(idx)) map.set(idx, { group, groupIndex, color });
+    });
+  });
+  return map;
 }
 
 function resize() {
@@ -427,16 +475,17 @@ function escapeHtml(s) {
 
 function renderGroupPanel() {
   const activeGroups = getActiveGroups();
-  UI.groupPanel.innerHTML = activeGroups.map(group => {
+  UI.groupPanel.innerHTML = activeGroups.map((group, groupIndex) => {
     const hits = findGroupMatchingIndices(group.terms);
     const hitLines = hits.length
       ? hits.map(i => `[${i}] ${CAPS[i].name} -> ${CAPS[i].masterBone}`).join('\n')
       : '未匹配到骨骼';
+    const color = GROUP_COLORS[groupIndex % GROUP_COLORS.length];
     const noteLine = group.note ? `<div class="groupTerms"><b>组信息：</b> ${escapeHtml(group.note)}</div>` : '';
     const motionLine = group.motion ? `<div class="groupTerms"><b>抖动硬直：</b> ${escapeHtml(group.motion)}</div>` : '';
     return `
       <details class="groupBox">
-        <summary>${escapeHtml(group.label)}（${group.terms.length} 项，命中 ${hits.length} 根）</summary>
+        <summary><span class="groupColorChip" style="background:${color}"></span>${escapeHtml(group.label)}（${group.terms.length} 项，命中 ${hits.length} 根）</summary>
         <div class="groupBody">
           ${noteLine}
           ${motionLine}
@@ -449,6 +498,7 @@ function renderGroupPanel() {
       </details>
     `;
   }).join('');
+  updateGroupOverlayButtons();
 }
 function worldPt(p) {
   return add(p, ST.modelOffset);
@@ -560,20 +610,22 @@ function makeCapsuleRings(a, b, radius, segs, capSteps) {
   });
 }
 
-function drawCapsule(cap, selected) {
+function drawCapsule(cap, selected, groupColor=null) {
   const a = worldPt(cap.a);
   const b = worldPt(cap.b);
   const rings = makeCapsuleRings(a, b, cap.radius, Number(UI.segments.value), Number(UI.capSteps.value));
 
-  if (selected) {
+  if (groupColor) {
+    ctx.strokeStyle = hexToRgba(groupColor, selected ? 1 : 0.88);
+  } else if (selected) {
     ctx.strokeStyle = 'rgba(255,241,223,0.98)';
   } else {
     const dim = UI.dimOthers.checked && hasSelection();
     ctx.strokeStyle = dim ? 'rgba(255,154,77,0.34)' : 'rgba(255,154,77,0.95)';
   }
 
-  const alpha = selected ? 1 : ((UI.dimOthers.checked && hasSelection()) ? 0.50 : 0.95);
-  const width = selected ? 1.7 : 1.0;
+  const alpha = groupColor ? (selected ? 1 : 0.90) : (selected ? 1 : ((UI.dimOthers.checked && hasSelection()) ? 0.50 : 0.95));
+  const width = groupColor ? (selected ? 2.1 : 1.45) : (selected ? 1.7 : 1.0);
 
   for (let r=0; r<rings.length; r++) {
     const curr = rings[r];
@@ -596,6 +648,63 @@ function drawCapsule(cap, selected) {
 
   const mid = project(worldPt(cap.center));
   ST.pickRecords.push({ idx: cap.i, x: mid.x, y: mid.y });
+}
+
+function drawRoundRect(x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
+function drawLabelBox(text, x, y, color) {
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.font = '700 13px system-ui, -apple-system, "Segoe UI", sans-serif';
+  ctx.textBaseline = 'middle';
+  const padX = 8;
+  const padY = 5;
+  const m = ctx.measureText(text);
+  const bw = m.width + padX * 2;
+  const bh = 25;
+  const bx = x - bw / 2;
+  const by = y - bh / 2;
+
+  ctx.shadowColor = 'rgba(0,0,0,.65)';
+  ctx.shadowBlur = 8;
+  ctx.fillStyle = 'rgba(8,10,14,.72)';
+  drawRoundRect(bx, by, bw, bh, 8);
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = hexToRgba(color, 0.92);
+  ctx.lineWidth = 1.6;
+  drawRoundRect(bx, by, bw, bh, 8);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, bx + padX, y + 0.5);
+  ctx.restore();
+}
+
+function drawGroupOverlayLabels(groups) {
+  groups.forEach((group, groupIndex) => {
+    const hits = findGroupMatchingIndices(group.terms).filter(idx => visibleCap(idx));
+    if (!hits.length) return;
+    const sum = hits.reduce((acc, idx) => {
+      const c = CAPS[idx].center;
+      acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2];
+      return acc;
+    }, [0, 0, 0]);
+    const center = [sum[0] / hits.length, sum[1] / hits.length, sum[2] / hits.length];
+    const p = project(worldPt(center));
+    const color = GROUP_COLORS[groupIndex % GROUP_COLORS.length];
+    drawLabelBox(group.label, p.x, p.y, color);
+  });
 }
 
 function refreshList() {
@@ -703,7 +812,22 @@ UI.groupPanel.addEventListener('click', (e) => {
 });
 
 UI.groupMode.addEventListener('change', () => {
+  if (ST.groupOverlayMode !== null) ST.groupOverlayMode = UI.groupMode.value;
   renderGroupPanel();
+});
+
+UI.showAllGroupsBtn.addEventListener('click', () => {
+  ST.groupOverlayMode = UI.groupMode.value;
+  UI.showCapsules.checked = true;
+  UI.isolateSelected.checked = false;
+  UI.dimOthers.checked = false;
+  updateGroupOverlayButtons();
+  fit(false, 1.12);
+});
+
+UI.hideAllGroupsBtn.addEventListener('click', () => {
+  ST.groupOverlayMode = null;
+  updateGroupOverlayButtons();
 });
 
 UI.boneList.addEventListener('change', () => {
@@ -861,14 +985,21 @@ function render() {
 
   let shown = 0;
   let links = 0;
+  const overlayGroups = getOverlayGroups();
+  const overlayMap = overlayGroups.length ? buildGroupOverlayMap(overlayGroups) : new Map();
 
   if (UI.showLinks.checked) {
     CAPS.forEach(cap => {
       if (!visibleCap(cap.i)) return;
       if (cap.parent >= 0 && visibleCap(cap.parent)) {
         const selected = isSelected(cap.i) || isSelected(cap.parent);
-        ctx.strokeStyle = selected ? 'rgba(255,241,223,0.88)' : 'rgba(255,154,77,0.30)';
-        const alpha = selected ? 0.9 : ((UI.dimOthers.checked && hasSelection()) ? 0.15 : 0.36);
+        const overlayMeta = overlayMap.get(cap.i) || overlayMap.get(cap.parent);
+        if (overlayMeta) {
+          ctx.strokeStyle = hexToRgba(overlayMeta.color, selected ? 0.82 : 0.34);
+        } else {
+          ctx.strokeStyle = selected ? 'rgba(255,241,223,0.88)' : 'rgba(255,154,77,0.30)';
+        }
+        const alpha = overlayMeta ? (selected ? 0.82 : 0.34) : (selected ? 0.9 : ((UI.dimOthers.checked && hasSelection()) ? 0.15 : 0.36));
         const width = selected ? 1.5 : 1.0;
         drawLine3(worldPt(CAPS[cap.parent].center), worldPt(cap.center), alpha, width);
         links++;
@@ -880,11 +1011,17 @@ function render() {
     CAPS.forEach(cap => {
       if (!visibleCap(cap.i)) return;
       shown++;
-      drawCapsule(cap, isSelected(cap.i));
+      const overlayMeta = overlayMap.get(cap.i);
+      drawCapsule(cap, isSelected(cap.i), overlayMeta ? overlayMeta.color : null);
     });
   }
 
+  if (overlayGroups.length) {
+    drawGroupOverlayLabels(overlayGroups);
+  }
+
   if (UI.showNames.checked) {
+    ctx.globalAlpha = 1;
     ctx.fillStyle = 'rgba(255,240,230,.92)';
     ctx.font = '11px system-ui';
     CAPS.forEach(cap => {
@@ -897,7 +1034,12 @@ function render() {
   stat1.textContent = `精确 body 数: ${CAPS.length}   当前显示: ${shown}`;
   stat2.textContent = `父子连线: ${links}   平行缩放: ${ST.zoom.toFixed(1)}`;
   stat3.textContent = `模型偏移: X ${ST.modelOffset[0].toFixed(1)} / Y ${ST.modelOffset[1].toFixed(1)} / Z ${ST.modelOffset[2].toFixed(1)}`;
-  if (hasSelection() && ST.selectedIndex >= 0) {
+  if (ST.groupOverlayMode) {
+    stat4.textContent = `当前分组着色: ${getGroupModeName(ST.groupOverlayMode)}（不会与另一组叠加）`;
+    stat5.textContent = hasSelection() && ST.selectedIndex >= 0 ? `仍可点击/选择单根；已选 ${ST.selectedIndices.length} 根` : '仍可点击/选择单根；选中: 无';
+    stat6.textContent = '';
+    stat7.textContent = '';
+  } else if (hasSelection() && ST.selectedIndex >= 0) {
     const cap = CAPS[ST.selectedIndex];
     stat4.textContent = `已选 ${ST.selectedIndices.length} 根；主选中: [${cap.i}] ${cap.name}`;
     stat5.textContent = `映射主骨: ${cap.masterBone}   parent=${cap.parent}`;
