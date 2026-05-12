@@ -58,6 +58,21 @@
     border:1px solid rgba(255,255,255,.10);
     background:rgba(255,255,255,.05); color:var(--text);
   }
+select {
+  background:#151c25;
+  color:#edf2f7;
+  color-scheme: dark;
+}
+
+select option {
+  background:#151c25;
+  color:#edf2f7;
+}
+
+select option:checked {
+  background:#3a4654;
+  color:#ffffff;
+}
   select[size] { height:260px; padding:4px; }
   button { cursor:pointer; font-weight:600; }
   button:hover { background:rgba(255,255,255,.09); }
@@ -100,8 +115,8 @@
     <div>
       <label>视角预设</label>
       <select id="preset">
-        <option value="game1">测试角度1</option>
-        <option value="game2">测试角度2</option>
+        <option value="game1">预设1</option>
+        <option value="game2">预设2</option>
         <option value="side">侧面</option>
         <option value="front">正面</option>
         <option value="top">俯视</option>
@@ -178,10 +193,14 @@
   </div>
 
   <div class="blk">
-    <label>预设骨骼组</label>
+    <label>预设骨骼组 / 类型切换</label>
+    <select id="groupMode" style="margin-bottom:8px;">
+      <option value="damage">DamageGroup（部位倍率组）</option>
+      <option value="part">PartGroup（抖动硬直组）</option>
+    </select>
     <div id="groupPanel"></div>
     <div class="small" style="margin-top:6px;">
-      每个组都可以先展开排查，再点击按钮自动选中本组全部骨骼。
+      可以在原有 DamageGroup 和新增 PartGroup（抖动硬直）之间切换；每个组都可以先展开排查，再点击按钮自动选中本组全部骨骼。
     </div>
   </div>
 
@@ -248,6 +267,7 @@ const UI = {
   multiSearchInput: document.getElementById('multiSearchInput'),
   multiSearchBtn: document.getElementById('multiSearchBtn'),
   clearSearchBtn: document.getElementById('clearSearchBtn'),
+  groupMode: document.getElementById('groupMode'),
   groupPanel: document.getElementById('groupPanel'),
   boneList: document.getElementById('boneList'),
   prevBtn: document.getElementById('prevBtn'),
@@ -275,13 +295,55 @@ const ST = {
   pickRecords: []
 };
 
-const GROUPS = [
-  { id: 0, label: 'group 0', terms: ['Pelvis'] },
-  { id: 1, label: 'group 1', terms: ['c5081_Neck', 'c5081_Neck1', 'c5081_Neck2', 'c5081_Head'] },
-  { id: 2, label: 'group 2', terms: ['Spine', 'Spine1', 'Spine2', 'L_Clavicle', 'Neck', 'R_Clavicle', 'L_UpperArm', 'Head', 'R_UpperArm'] },
-  { id: 3, label: 'group 3', terms: ['c5081_Spine1', 'c5081_Spine2', 'c5081_L_Clavicle', 'c5081_R_Clavicle', 'L_Thigh', 'R_Thigh', 'c5081_L_UpperArm', 'c5081_R_UpperArm', 'L_Calf', 'R_Calf', 'c5081_L_Forearm', 'c5081_R_Forearm', 'L_Foot', 'R_Foot', 'c5081_L_Hand', 'c5081_R_Hand', 'c5081_L Finger0', 'c5081_R Finger0', 'L_Forearm', 'R_Forearm', 'L_Hand', 'R_Hand'] },
-  { id: 4, label: 'group 4', terms: ['c5081_Pelvis', 'c5081_L_Thigh', 'c5081_R_Thigh', 'c5081_Spine', 'c5081_Tail', 'c5081_L_Calf', 'c5081_R_Calf', 'c5081_Tail1', 'c5081_L_Foot', 'c5081_R_Foot', 'c5081_L_Toe0', 'c5081_R_Toe0'] }
+const DAMAGE_GROUPS = [
+  { id: 0, label: 'DamageGroup 0', note: '原有组：人骨盆', terms: ['Pelvis'] },
+  { id: 1, label: 'DamageGroup 1', note: '原有组：马前部', terms: ['c5081_Neck', 'c5081_Neck1', 'c5081_Neck2', 'c5081_Head'] },
+  { id: 2, label: 'DamageGroup 2', note: '原有组：人上半身', terms: ['Spine', 'Spine1', 'Spine2', 'L_Clavicle', 'Neck', 'R_Clavicle', 'L_UpperArm', 'Head', 'R_UpperArm'] },
+  { id: 3, label: 'DamageGroup 3', note: '原有组：马中部 / 混合', terms: ['c5081_Spine1', 'c5081_Spine2', 'c5081_L_Clavicle', 'c5081_R_Clavicle', 'L_Thigh', 'R_Thigh', 'c5081_L_UpperArm', 'c5081_R_UpperArm', 'L_Calf', 'R_Calf', 'c5081_L_Forearm', 'c5081_R_Forearm', 'L_Foot', 'R_Foot', 'c5081_L_Hand', 'c5081_R_Hand', 'c5081_L Finger0', 'c5081_R Finger0', 'L_Forearm', 'R_Forearm', 'L_Hand', 'R_Hand'] },
+  { id: 4, label: 'DamageGroup 4', note: '原有组：马后部', terms: ['c5081_Pelvis', 'c5081_L_Thigh', 'c5081_R_Thigh', 'c5081_Spine', 'c5081_Tail', 'c5081_L_Calf', 'c5081_R_Calf', 'c5081_Tail1', 'c5081_L_Foot', 'c5081_R_Foot', 'c5081_L_Toe0', 'c5081_R_Toe0'] }
 ];
+
+const PART_GROUPS = [
+  {
+    id: 0,
+    label: 'PartGroup 0（人盆骨）',
+    note: 'part blend 0；pwv=0；0x0000；无动作',
+    motion: '无动作',
+    terms: ['Pelvis']
+  },
+  {
+    id: 1,
+    label: 'PartGroup 1（马前部）',
+    note: 'part blend 1；pwv=257；0x0101；a000_009510（马头抖动）',
+    motion: 'a000_009510（马头抖动）',
+    terms: ['c5081_Neck', 'c5081_Neck1', 'c5081_Neck2', 'c5081_Head']
+  },
+  {
+    id: 2,
+    label: 'PartGroup 2（人上半身）',
+    note: 'part blend 2；pwv=514/770；0x0202/0x0302；a000_009511（人身抖动）',
+    motion: 'a000_009511（人身抖动）',
+    terms: ['Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'R_UpperArm', 'R_Clavicle', 'L_Clavicle', 'L_UpperArm', 'R_Forearm', 'R_Hand', 'L_Forearm', 'L_Hand']
+  },
+  {
+    id: 3,
+    label: 'PartGroup 3（马中部）',
+    note: 'part blend 3；pwv=771/1027；0x0303/0x0403；a000_009512（马身抖动）',
+    motion: 'a000_009512（马身抖动）',
+    terms: ['R_Thigh', 'R_Foot', 'R_Calf', 'L_Thigh', 'L_Foot', 'L_Calf', 'c5081_Spine1', 'c5081_Spine2', 'c5081_R_Forearm', 'c5081_R_UpperArm', 'c5081_R_Hand', 'c5081_R Finger0', 'c5081_R_Clavicle', 'c5081_L_Forearm', 'c5081_L_UpperArm', 'c5081_L_Hand', 'c5081_L Finger0', 'c5081_L_Clavicle', 'c5081_Spine']
+  },
+  {
+    id: 4,
+    label: 'PartGroup 4（马后部）',
+    note: 'part blend 4；pwv=1028；0x0404；a000_009513（马臀抖动）',
+    motion: 'a000_009513（马臀抖动）',
+    terms: ['c5081_Pelvis', 'c5081_Tail', 'c5081_Tail1', 'c5081_R_Thigh', 'c5081_R_Foot', 'c5081_R_Toe0', 'c5081_R_Calf', 'c5081_L_Thigh', 'c5081_L_Foot', 'c5081_L_Toe0', 'c5081_L_Calf']
+  }
+];
+
+function getActiveGroups() {
+  return UI.groupMode && UI.groupMode.value === 'part' ? PART_GROUPS : DAMAGE_GROUPS;
+}
 
 function resize() {
   cv.width = innerWidth * devicePixelRatio;
@@ -364,26 +426,30 @@ function escapeHtml(s) {
 }
 
 function renderGroupPanel() {
-  UI.groupPanel.innerHTML = GROUPS.map(group => {
+  const activeGroups = getActiveGroups();
+  UI.groupPanel.innerHTML = activeGroups.map(group => {
     const hits = findGroupMatchingIndices(group.terms);
     const hitLines = hits.length
       ? hits.map(i => `[${i}] ${CAPS[i].name} -> ${CAPS[i].masterBone}`).join('\n')
       : '未匹配到骨骼';
+    const noteLine = group.note ? `<div class="groupTerms"><b>组信息：</b> ${escapeHtml(group.note)}</div>` : '';
+    const motionLine = group.motion ? `<div class="groupTerms"><b>抖动硬直：</b> ${escapeHtml(group.motion)}</div>` : '';
     return `
       <details class="groupBox">
-        <summary>${group.label}（${group.terms.length} 项，命中 ${hits.length} 根）</summary>
+        <summary>${escapeHtml(group.label)}（${group.terms.length} 项，命中 ${hits.length} 根）</summary>
         <div class="groupBody">
+          ${noteLine}
+          ${motionLine}
           <div class="groupTerms"><b>目标名：</b> ${escapeHtml(group.terms.join('  '))}</div>
           <div class="groupHits"><b>排查结果：</b>\n${escapeHtml(hitLines)}</div>
           <div class="groupBtns">
-            <button type="button" data-group-id="${group.id}" class="groupSelectBtn">选择 ${group.label}</button>
+            <button type="button" data-group-id="${group.id}" class="groupSelectBtn">选择 ${escapeHtml(group.label)}</button>
           </div>
         </div>
       </details>
     `;
   }).join('');
 }
-
 function worldPt(p) {
   return add(p, ST.modelOffset);
 }
@@ -628,12 +694,16 @@ UI.groupPanel.addEventListener('click', (e) => {
   const btn = e.target.closest('.groupSelectBtn');
   if (!btn) return;
   const groupId = Number(btn.dataset.groupId);
-  const group = GROUPS.find(g => g.id === groupId);
+  const group = getActiveGroups().find(g => g.id === groupId);
   if (!group) return;
   const matches = findGroupMatchingIndices(group.terms);
   const primary = matches.length ? matches[matches.length - 1] : -1;
   setSelection(matches, primary);
   refreshList();
+});
+
+UI.groupMode.addEventListener('change', () => {
+  renderGroupPanel();
 });
 
 UI.boneList.addEventListener('change', () => {
